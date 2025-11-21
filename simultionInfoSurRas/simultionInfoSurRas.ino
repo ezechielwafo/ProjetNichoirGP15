@@ -8,7 +8,7 @@ const char* ssid = "electroProjectWifi";
 const char* password = "B1MesureEnv";
 
 // ⚠️ À REMPLACER PAR L'ADRESSE IP DE VOTRE RASPBERRY PI
-const char* mqtt_server = "192.168.2.48"; 
+const char* mqtt_server = "192.168.2.9"; 
 const int mqtt_port = 1883;
 
 // Topic pour l'envoi du statut de la batterie (doit correspondre au script Python)
