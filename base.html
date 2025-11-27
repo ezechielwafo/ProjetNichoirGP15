@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{% endblock %} - HEPL Projet Nichoir</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <div class="logo-text">
+                <strong>HEPL</strong><br>
+                Haute École De La Province De Liege
+            </div>
+        </div>
+        <nav>
+            <a href="{{ url_for('acceuil') }}">
+                <span>🏠</span> Accueil
+            </a>
+            <a href="{{ url_for('a_propos') }}">
+                <span>🖼️</span> Mes images
+            </a>
+            <a href="{{ url_for('contact') }}">
+                <span>✉️</span> Contact
+            </a>
+        </nav>
+    </header>
+
+    {% block contenu %}{% endblock %}
+
+    <footer>
+        <p>&copy; 2025 HEPL - Haute École De La Province De Liège</p>
+    </footer>
+</body>
+</html>

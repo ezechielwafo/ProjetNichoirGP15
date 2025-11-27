@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Mes Images{% endblock %}
+{% block contenu %}
+<main style="max-width: 1200px; margin: 40px auto; padding: 20px;">
+    <h1 style="text-align: center; margin-bottom: 30px; color: #333;">📸 Galerie des Images du Nichoir</h1>
+
+    {% if images %}
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
+            {% for image in images %}
+            <div style="background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.3s;">
+                <img src="{{ image.url }}"
+                     alt="{{ image.imageName }}"
+                     style="width: 100%; height: 250px; object-fit: cover; cursor: pointer;"
+                     onclick="openModal('{{ image.url }}', '{{ image.imageName }}', '{{ image.submissionDate }}')">
+
+                <div style="padding: 15px;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 16px; color: #333;">{{ image.imageName }}</h3>
+                    <p style="margin: 0; color: #666; font-size: 14px;">
+                        📅 {{ image.submissionDate }}
+                    </p>
+                    <form action="{{ url_for('delete_image', id=image.id) }}" method="POST" style="margin-top: 10px;">
+                        <button type="submit"
+                                onclick="return confirm('Voulez-vous vraiment supprimer cette image ?')"
+                                style="width: 100%; padding: 8px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                            🗑️ Supprimer
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div style="text-align: center; padding: 60px 20px; background: #f8f9fa; border-radius: 8px;">
+            <p style="font-size: 18px; color: #666; margin: 0;">
+                📭 Aucune image dans la galerie pour le moment.
+            </p>
+            <p style="color: #999; margin-top: 10px;">
+                Les photos capturées par l'ESP32-CAM apparaîtront ici automatiquement.
+            </p>
+        </div>
+    {% endif %}
+</main>
+
+<!-- Modal pour afficher l'image en grand -->
+<div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; cursor: pointer;" onclick="closeModal()">
+    <span style="position: absolute; top: 20px; right: 40px; color: white; font-size: 40px; font-weight: bold; cursor: pointer;">&times;</span>
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 20px;">
+        <img id="modalImage" src="" style="max-width: 90%; max-height: 80vh; object-fit: contain; border-radius: 8px;">
+        <div style="color: white; text-align: center; margin-top: 20px;">
+            <h2 id="modalTitle" style="margin: 10px 0;"></h2>
+            <p id="modalDate" style="margin: 5px 0; opacity: 0.8;"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+function openModal(url, name, date) {
+    document.getElementById('imageModal').style.display = 'block';
+    document.getElementById('modalImage').src = url;
+    document.getElementById('modalTitle').textContent = name;
+    document.getElementById('modalDate').textContent = '📅 ' + date;
+    document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+    document.getElementById('imageModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+// Fermer avec la touche Échap
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeModal();
+    }
+});
+</script>
+{% endblock %}
