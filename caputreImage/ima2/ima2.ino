@@ -3,7 +3,7 @@
 #include "esp_http_server.h" 
 #include <PubSubClient.h>   
 #include <ArduinoJson.h>    
-#include <HTTPClient.h>     
+#include <HTTPClient.h>     // Pour l'envoi HTTP POST
 
 // --- 1. CONFIGURATION DU RÉSEAU ET SERVEUR ---
 const char *ssid = "electroProjectWifi";
@@ -23,7 +23,6 @@ const unsigned long CAPTURE_INTERVAL_MS = 5000;
 
 // Pin pour la lecture de la batterie
 #define BATTERY_ADC_PIN 38 
-
 
 // --- 2. DÉFINITIONS DES BROCHES M5STACK (CORRIGÉES) ---
 #define PWDN_GPIO_NUM -1 
@@ -60,12 +59,12 @@ void sendImageToServer();
 
 
 // --- 4. FONCTIONS DE GESTION DU SYSTÈME ET DE LA BATTERIE (MQTT) ---
+// (Ces fonctions sont conservées et fonctionnent)
 
 float read_battery_level() {
     pinMode(BATTERY_ADC_PIN, INPUT); 
     int raw_adc = analogRead(BATTERY_ADC_PIN);
     
-    // Approximation (à calibrer)
     float voltage = (float)raw_adc / 4095.0 * 3.3 * 2.0; 
     float min_voltage = 3.3; 
     float max_voltage = 4.2; 
@@ -78,6 +77,7 @@ float read_battery_level() {
 }
 
 void publishBatteryStatus() {
+    // ... (Logique MQTT de publication du statut) ...
     float batteryLevel = read_battery_level();
     
     char timestamp[20];
@@ -119,19 +119,12 @@ void reconnect() {
 }
 
 
-// --- 5. FONCTION D'ENVOI D'IMAGE HTTP POST (Optimisée pour la stabilité) ---
+// --- 5. FONCTION D'ENVOI D'IMAGE HTTP POST (CORRIGÉE POUR VIEILLES LIBRAIRIES) ---
 
 void sendImageToServer() {
-    // ➡️ SOLUTION CONTRE BUFFER NULL : Forcer la résolution minimale pour garantir la RAM
-    sensor_t *s = esp_camera_sensor_get();
-    if (s != NULL) {
-        s->set_framesize(s, FRAMESIZE_QQVGA); // 160x120 pixels
-        s->set_quality(s, 50); // Qualité plus faible = petit fichier
-    }
-
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) {
-        Serial.println("❌ Echec de la capture pour l'envoi (Buffer NULL).");
+        Serial.println("Echec de la capture pour l'envoi.");
         return;
     }
 
@@ -149,17 +142,23 @@ void sendImageToServer() {
     
     HTTPClient http;
 
+    // --- CONSTRUCTION DU CORPS COMPLET (Méthode de la chaîne d'octets) ---
+    // Cette méthode est plus gourmande en RAM mais contourne les problèmes de sendRequest séquentiel
+    
+    // 1. Définition du corps de la requête (header + image + trailer)
     String header = "--" + boundary + "\r\n";
     header += "Content-Disposition: form-data; name=\"image\"; filename=\"" + fileName + "\"\r\n";
     header += "Content-Type: image/jpeg\r\n\r\n";
     String trailer = "\r\n--" + boundary + "--\r\n";
     
+    // 2. Calculer la taille totale
     size_t headerSize = header.length();
     size_t imageSize = fb->len;
     size_t trailerSize = trailer.length();
     size_t totalPayloadSize = headerSize + imageSize + trailerSize;
 
-    // --- ENVOI EN UN SEUL BLOC MÉMOIRE (Méthode stable pour ancienne librairie) ---
+    // 3. Allouer un buffer pour l'ensemble du payload (ATTENTION RAM !)
+    // Note: Utiliser ps_malloc pour la PSRAM si disponible, sinon DRAM
     uint8_t *payloadBuffer = (uint8_t*) malloc(totalPayloadSize); 
     if (payloadBuffer == NULL) {
         Serial.println("ERREUR RAM: Echec d'allocation du buffer pour l'image.");
@@ -167,7 +166,7 @@ void sendImageToServer() {
         return;
     }
 
-    // Copie des morceaux dans le buffer
+    // 4. Copier les morceaux dans le buffer
     size_t offset = 0;
     memcpy(payloadBuffer + offset, header.c_str(), headerSize);
     offset += headerSize;
@@ -175,20 +174,21 @@ void sendImageToServer() {
     offset += imageSize;
     memcpy(payloadBuffer + offset, trailer.c_str(), trailerSize);
 
-    // Envoi du POST
+    // 5. Envoyer en une seule fois avec la méthode POST simple
     http.begin(serverPath);
     http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     
     int httpResponseCode = http.POST(payloadBuffer, totalPayloadSize); 
 
-    // Nettoyage
+    // 6. Nettoyage
     free(payloadBuffer);
     esp_camera_fb_return(fb); 
 
-    // Logique MQTT (Métadonnées)
+    // 7. Logique MQTT
     if (httpResponseCode == 200) {
         Serial.printf("✅ HTTP OK. Image envoyee. Code: %d\n", httpResponseCode);
         
+        // --- MQTT METADONNÉES ---
         DynamicJsonDocument doc(512);
         doc["timestamp"] = timestamp_s;
         doc["file_name"] = fileName;
@@ -217,8 +217,7 @@ void config_camera() {
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
     
-    // Assignation des broches M5Stack (Garanties d'être les plus stables)
-    // NOTE: Les numéros de broches doivent être définis en haut du sketch.
+    // Assignation des broches M5Stack corrigées
     config.pin_d0 = Y2_GPIO_NUM; config.pin_d1 = Y3_GPIO_NUM; config.pin_d2 = Y4_GPIO_NUM;
     config.pin_d3 = Y5_GPIO_NUM; config.pin_d4 = Y6_GPIO_NUM; config.pin_d5 = Y7_GPIO_NUM;
     config.pin_d6 = Y8_GPIO_NUM; config.pin_d7 = Y9_GPIO_NUM;
@@ -228,31 +227,32 @@ void config_camera() {
     config.pin_sccb_sda = SIOD_GPIO_NUM; config.pin_sccb_scl = SIOC_GPIO_NUM;
     
     config.xclk_freq_hz = 20000000;
-    config.pixel_format = PIXFORMAT_JPEG; 
-    
-    // ➡️ CHANGEMENT CLÉ : Forcer la plus petite résolution sur la DRAM
-    config.frame_size = FRAMESIZE_QQVGA; // 160x120 pixels
-    config.jpeg_quality = 50;           // Qualité basse = petit fichier
+    config.pixel_format = PIXFORMAT_JPEG;
+    config.frame_size = FRAMESIZE_QQVGA;
+    config.jpeg_quality = 40;
     config.fb_count = 1;
-    config.fb_location = CAMERA_FB_IN_DRAM; // Forcer la RAM interne (plus stable)
 
+    if (psramFound()) {
+      config.jpeg_quality = 10;
+      config.fb_count = 2;
+      config.grab_mode = CAMERA_GRAB_LATEST;
+    } else {
+      config.frame_size = FRAMESIZE_SVGA;
+      config.fb_location = CAMERA_FB_IN_DRAM;
+    }
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
         Serial.printf("Echec de l'initialisation de la camera: 0x%x\n", err);
-        return; // Quitter si l'initialisation échoue
     }
 
     sensor_t *s = esp_camera_sensor_get();
-    if (s != NULL && s->id.PID == OV3660_PID) {
-        // Stabiliser l'horloge et les paramètres de base
-       // s->set_xclk(s, 20000000); // Répéter la fréquence XCLK pour la stabilité
-        s->set_vflip(s, 1); 
-        s->set_brightness(s, 1); 
-        s->set_saturation(s, -2);
-        // Note: La taille FRAMESIZE_QQVGA est déjà définie pour le test.
+    if (s->id.PID == OV3660_PID) {
+        s->set_vflip(s, 1); s->set_brightness(s, 1); s->set_saturation(s, -2);
+        s->set_framesize(s, FRAMESIZE_QVGA);
     }
 }
+
 
 // --- 7. SETUP et LOOP ---
 

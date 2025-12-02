@@ -7,7 +7,7 @@
 const char* ssid = "electroProjectWifi";
 const char* password = "B1MesureEnv";
 
-// ⚠️ À REMPLACER PAR L'ADRESSE IP DE VOTRE RASPBERRY PI
+// ⚠️ À REMPLACER PAR L'ADRESSE IP DE VOTRE RASPBERRY PIc
 const char* mqtt_server = "192.168.2.9"; 
 const int mqtt_port = 1883;
 
