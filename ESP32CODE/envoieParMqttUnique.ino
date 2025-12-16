@@ -162,13 +162,11 @@ void setup() {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
     pinMode(2, OUTPUT);
     digitalWrite(2, LOW);
-
+    
     config_camera();
     connectWiFi();
     connectMQTT();
 }
-
-// ===== LOOP =====
 void loop() {
     if(!mqttClient.connected()) connectMQTT();
     mqttClient.loop();
