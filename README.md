@@ -69,5 +69,4 @@ Le système doit permettre :
 
 ---
 
-## 🔌 6. Structure du dépôt GitHub
 
