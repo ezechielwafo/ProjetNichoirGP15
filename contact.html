@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+
+{% block contenu %}
+    <!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact - Nichoir Connecté</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #2c3e50, #4a6491);
+            color: white;
+            padding: 0.3rem 0.
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .header-content {
+            text-align: center;
+            padding: 0 20px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        nav {
+            background-color: #34495e;
+            padding: 0.5rem;
+            border-radius: 5px;
+        }
+
+        .nav-menu {
+            display: flex;
+            justify-content: center;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        .nav-menu a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .nav-menu a:hover {
+            background-color: rgba(255,255,255,0.1);
+            transform: translateY(-2px);
+        }
+
+        .nav-menu a.active {
+            background-color: #3498db;
+        }
+
+        .project-description {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-left: 5px solid #3498db;
+        }
+
+        .project-description h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+        }
+
+        .project-description p {
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            color: #555;
+        }
+
+        .team-section {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .team-section h2 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+            position: relative;
+            padding-bottom: 10px;
+        }
+
+        .team-section h2::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px;
+            height: 2px;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+        }
+
+        .team-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .team-member {
+            background: linear-gradient(145deg, #ffffff, #f8f9fa);
+            padding: 1.5rem;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: 1px solid #eaeaea;
+        }
+
+        .team-member:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+
+        .member-photo {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            margin: 0 auto 1rem;
+            overflow: hidden;
+            border: 4px solid #3498db;
+            background-color: #f1f1f1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            color: #3498db;
+        }
+
+        .member-photo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .member-name {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+
+        .member-role {
+            color: #3498db;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+
+        .member-contributions {
+            color: #666;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            margin-bottom: 1rem;
+        }
+
+        .contact-info {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
+        .contact-btn {
+            padding: 8px 15px;
+            background-color: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .contact-btn:hover {
+            background-color: #2980b9;
+        }
+
+        .institution-info {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+
+        .institution-logo {
+            max-width: 200px;
+            margin-bottom: 1rem;
+        }
+
+        .institution-info h3 {
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+
+        .institution-info p {
+            color: #666;
+            margin-bottom: 0.5rem;
+        }
+
+        .project-details {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .detail-item {
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #2ecc71;
+        }
+
+        .detail-item h4 {
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+
+        .detail-item p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding: 2rem 0;
+            color: #7f8c8d;
+            border-top: 1px solid #eee;
+        }
+
+        @media (max-width: 768px) {
+            .nav-menu {
+                flex-direction: column;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .team-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header-content {
+                padding: 0 10px;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <section class="team-section">
+        <h2>👥 Notre Équipe</h2>
+        <div class="team-grid">
+            <!-- Membre 1 -->
+            <div class="team-member">
+                <div class="member-photo">
+                    <span>👨‍💻</span>
+                </div>
+                <h3 class="member-name">Wafo Ezechiel</h3>
+                <p class="member-role">M18P1</p>
+                <p class="member-contributions">Etudiant en Master en sciences de l'ingenieur industriel orientation Informatique</p>
+                <div class="contact-info">
+                    <a href="mailto:michaeli.wafonde@student.hepl.be" class="contact-btn">📧 Email</a>
+                </div>
+            </div>
+
+            <!-- Membre 2 -->
+            <div class="team-member">
+                <div class="member-photo">
+                    <span>👩🔬</span>
+                </div>
+                <h3 class="member-name">Kouatche Anila</h3>
+                <p class="member-role">M18P1</p>
+                <p class="member-contributions">Etudiante en Master en sciences de l'ingénieur industriel, orientation informatique </p>
+                <div class="contact-info">
+                    <a href="mailto:anila.kouatchetchadio@student.hepl.be" class="contact-btn">📧 Email</a>
+                </div>
+            </div>
+
+            <!-- Membre 3 -->
+            <div class="team-member">
+                <div class="member-photo">
+                    <span>🎨</span>
+                </div>
+                <h3 class="member-name">Nganne Elvira</h3>
+                <p class="member-role">M13P1</p>
+                <p class="member-contributions">Etudiante en Master en sciences de l'ingénieur industriel, orientation électronique option Systèmes embarqués </p>
+                <div class="contact-info">
+                    <a href="mailto:elvira.ngannekueda@student.hepl.be" class="contact-btn">📧 Email</a>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+
+    <section class="project-details">
+        <h2>Détails Techniques du Projet</h2>
+        <div class="details-grid">
+            <div class="detail-item">
+                <h4>🖥️ Technologies</h4>
+                <p>Python, Flask, HTML/CSS, JavaScript, MQTT, MariaDB, ESP32, C++</p>
+            </div>
+        </div>
+    </section>
+</body>
+</html>
+{% endblock %}
