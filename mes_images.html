@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Mes Images{% endblock %}
+{% block contenu %}
+<style>
+    /* SEULEMENT la navbar noire */
+    .black-nav {
+        background-color: #34495e;
+        padding: 2rem 0rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .black-nav .nav-menu {
+        display: flex;
+        justify-content: center;
+        list-style: none;
+        gap: 1rem;
+    }
+
+    .black-nav .nav-menu a {
+        color: white;
+        text-decoration: none;
+        font-weight: 500;
+        padding: 0.4rem 0.8rem;
+        border-radius: 4px;
+        transition: all 0.3s ease;
+        font-size: 0.95rem;
+    }
+
+    .black-nav .nav-menu a:hover {
+        background-color: rgba(255,255,255,0.15);
+        transform: translateY(-1px);
+    }
+
+    .black-nav .nav-menu a.active {
+        background-color: #3498db;
+    }
+
+    /* Badge batterie */
+    .battery-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 5px;
+    }
+
+    .battery-high { background-color: #27ae60; color: white; }
+    .battery-medium { background-color: #f39c12; color: white; }
+    .battery-low { background-color: #e74c3c; color: white; }
+    .battery-unknown { background-color: #95a5a6; color: white; }
+
+    /* Info card */
+    .info-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 5px 0;
+        font-size: 13px;
+        color: #555;
+    }
+
+    .info-icon {
+        font-size: 16px;
+    }
+</style>
+
+<nav class="black-nav">
+    <ul class="nav-menu">
+        <li><a href="/"></a></li>
+        <li><a href="/mes_images">🖼️</a></li>
+        <li><a href="/contact"></a></li>
+    </ul>
+</nav>
+
+<main style="max-width: 1200px; margin: 40px auto; padding: 20px;">
+    <div>
+        <h1 style="text-align: center; margin-bottom: 30px; color: #333;">📸 Galerie des Images du Nichoir</h1>
+        {% if images %}
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px;">
+                {% for image in images %}
+                <div style="background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.3s;">
+                    <img src="{{ image.url }}"
+                        alt="{{ image.imageName }}"
+                        style="width: 100%; height: 250px; object-fit: cover; cursor: pointer;"
+                        onclick="openModal('{{ image.url }}', '{{ image.imageName }}', '{{ image.submissionDate }}', {% if image.battery_data %}{{ image.battery_data.voltage }}, {{ image.battery_data.percentage }}{% else %}null, null{% endif %}, '{{ image.trigger_type or "N/A" }}', {{ image.boot_count or 0 }}, {{ image.pir_count or 0 }})">
+
+                    <div style="padding: 15px;">
+                        <h3 style="margin: 0 0 10px 0; font-size: 16px; color: #333;">{{ image.imageName }}</h3>
+
+                        <div class="info-line">
+                            <span class="info-icon">📅</span>
+                            <span>{{ image.submissionDate.strftime('%d/%m/%Y %H:%M:%S') if image.submissionDate else 'N/A' }}</span>
+                        </div>
+
+                        {% if image.battery_data %}
+                        <div class="info-line">
+                            <span class="info-icon">🔋</span>
+                            <span class="battery-badge
+                                {% if image.battery_data.percentage >= 60 %}battery-high
+                                {% elif image.battery_data.percentage >= 30 %}battery-medium
+                                {% else %}battery-low{% endif %}">
+                                {{ image.battery_data.percentage }}% ({{ "%.2f"|format(image.battery_data.voltage) }}V)
+                            </span>
+                        </div>
+                        {% else %}
+                        <div class="info-line">
+                            <span class="info-icon">🔋</span>
+                            <span class="battery-badge battery-unknown">N/A</span>
+                        </div>
+                        {% endif %}
+
+                        {% if image.trigger_type %}
+                        <div class="info-line">
+                            <span class="info-icon">🎯</span>
+                            <span>Trigger: <strong>{{ image.trigger_type }}</strong></span>
+                        </div>
+                        {% endif %}
+
+                        {% if image.boot_count or image.pir_count %}
+                        <div class="info-line" style="font-size: 11px; color: #888;">
+                            <span>Boot: {{ image.boot_count or 0 }} | PIR: {{ image.pir_count or 0 }}</span>
+                        </div>
+                        {% endif %}
+
+                        <form action="{{ url_for('delete_image', id=image.id) }}" method="POST" style="margin-top: 12px;">
+                            <button type="submit"
+                                    onclick="return confirm('Voulez-vous vraiment supprimer cette image ?')"
+                                    style="width: 100%; padding: 8px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                                🗑️ Supprimer
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div style="text-align: center; padding: 60px 20px; background: #f8f9fa; border-radius: 8px;">
+                <p style="font-size: 18px; color: #666; margin: 0;">
+                    📭 Aucune image dans la galerie pour le moment.
+                </p>
+                <p style="color: #999; margin-top: 10px;">
+                    Les photos capturées par l'ESP32-CAM apparaîtront ici automatiquement.
+                </p>
+            </div>
+        {% endif %}
+    </div>
+</main>
+
+<!-- Modal pour afficher l'image en grand -->
+<div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; cursor: pointer;" onclick="closeModal()">
+    <span style="position: absolute; top: 20px; right: 40px; color: white; font-size: 40px; font-weight: bold; cursor: pointer;">&times;</span>
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 20px;">
+        <img id="modalImage" src="" style="max-width: 90%; max-height: 70vh; object-fit: contain; border-radius: 8px;">
+        <div style="color: white; text-align: center; margin-top: 20px; background: rgba(0,0,0,0.5); padding: 20px; border-radius: 12px; max-width: 600px;">
+            <h2 id="modalTitle" style="margin: 10px 0;"></h2>
+            <p id="modalDate" style="margin: 10px 0; opacity: 0.9; font-size: 16px;"></p>
+            <div id="modalBattery" style="margin: 10px 0; font-size: 18px; font-weight: 600;"></div>
+            <div id="modalInfo" style="margin: 10px 0; opacity: 0.8; font-size: 14px;"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function openModal(url, name, date, voltage, percentage, trigger, bootCount, pirCount) {
+    document.getElementById('imageModal').style.display = 'block';
+    document.getElementById('modalImage').src = url;
+    document.getElementById('modalTitle').textContent = name;
+    document.getElementById('modalDate').textContent = '📅 ' + date;
+
+    // Affichage batterie
+    const batteryDiv = document.getElementById('modalBattery');
+    if (voltage !== null && percentage !== null) {
+        let batteryColor = '#27ae60'; // Vert par défaut
+        if (percentage < 30) batteryColor = '#e74c3c'; // Rouge
+        else if (percentage < 60) batteryColor = '#f39c12'; // Orange
+
+        batteryDiv.innerHTML = `🔋 Batterie: <span style="color: ${batteryColor}">${percentage}% (${voltage.toFixed(2)}V)</span>`;
+    } else {
+        batteryDiv.innerHTML = '🔋 Batterie: <span style="color: #95a5a6">N/A</span>';
+    }
+
+    // Affichage infos supplémentaires
+    const infoDiv = document.getElementById('modalInfo');
+    let infoText = '';
+    if (trigger && trigger !== 'N/A') {
+        infoText += `🎯 Trigger: ${trigger} | `;
+    }
+    infoText += `🔢 Boot: ${bootCount} | PIR: ${pirCount}`;
+    infoDiv.textContent = infoText;
+
+    document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+    document.getElementById('imageModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+// Fermer avec la touche Échap
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        closeModal();
+    }
+});
+</script>
+{% endblock %}
