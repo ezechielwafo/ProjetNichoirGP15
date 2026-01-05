@@ -1,0 +1,499 @@
+#include <WiFi.h>
+#include <WiFiManager.h>  
+#include <PubSubClient.h>
+#include "esp_camera.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include "base64.h"
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
+
+// ===== CONFIGURATION =====
+const char* mqtt_server = "192.168.2.46";
+const int mqtt_port = 1883;
+const char* mqtt_topic = "nichoir/photo";
+
+// ===== PINS TIMERCAM =====
+const int PIR_PIN = 13;
+const int LED_PIN = 2;
+const int BATTERY_ADC_PIN = 38;
+const int BAT_HOLD_PIN = 33;
+
+// ===== CONFIGURATION BATTERIE =====
+const float ADC_REFERENCE = 3.3;
+const int ADC_RESOLUTION = 4095;
+const float VOLTAGE_CALIBRATION = 1.38;
+
+// ===== FILTRES PIR AJOUTÉS =====
+const int PIR_FILTER_COUNT = 5;       // 5 lectures pour confirmation
+const int PIR_DEBOUNCE_MS = 100;      // 100ms entre lectures
+const int PIR_COOLDOWN_MS = 5000;     // 5 secondes entre détections
+
+// ===== COMPTEURS RTC =====
+RTC_DATA_ATTR int bootCount = 0;
+RTC_DATA_ATTR int photoCount = 0;
+RTC_DATA_ATTR unsigned long lastPhotoTime = 0;
+RTC_DATA_ATTR int wifiPortalStarted = 0;
+RTC_DATA_ATTR unsigned long lastPirDetection = 0;
+
+// ===== TIMINGS =====
+const unsigned long PHOTO_COOLDOWN_MS = 30000;
+const unsigned long WAIT_AFTER_PHOTO_MS = 15000;
+
+// ===== CONFIG CAMERA =====
+#define PWDN_GPIO_NUM     -1
+#define RESET_GPIO_NUM    15
+#define XCLK_GPIO_NUM     27
+#define SIOD_GPIO_NUM     25
+#define SIOC_GPIO_NUM     23
+#define Y9_GPIO_NUM       19
+#define Y8_GPIO_NUM       36
+#define Y7_GPIO_NUM       18
+#define Y6_GPIO_NUM       39
+#define Y5_GPIO_NUM        5
+#define Y4_GPIO_NUM       34
+#define Y3_GPIO_NUM       35
+#define Y2_GPIO_NUM       32
+#define VSYNC_GPIO_NUM    22
+#define HREF_GPIO_NUM     26
+#define PCLK_GPIO_NUM     21
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// ===== FONCTIONS FILTRES PIR =====
+bool checkPIRMovement() {
+    unsigned long currentTime = millis();
+    
+    // 1. Vérifier cooldown entre détections
+    if(currentTime - lastPirDetection < PIR_COOLDOWN_MS) {
+        return false;
+    }
+    
+    // 2. Lire le PIR 5 fois avec délai
+    int highCount = 0;
+    for(int i = 0; i < PIR_FILTER_COUNT; i++) {
+        if(digitalRead(PIR_PIN) == HIGH) {
+            highCount++;
+        }
+        delay(PIR_DEBOUNCE_MS);
+    }
+    
+    // 3. Vérifier si au moins 4 lectures sur 5 sont HIGH
+    if(highCount >= 4) {
+        lastPirDetection = currentTime;
+        Serial.printf("✅ Mouvement confirmé (%d/%d)\n", highCount, PIR_FILTER_COUNT);
+        return true;
+    }
+    
+    return false;
+}
+
+bool isPIRTriggeredWakeup() {
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    
+    if(wakeup_reason == ESP_SLEEP_WAKEUP_EXT0) {
+        if(checkPIRMovement()) {
+            Serial.println("🔴 RÉVEIL PAR MOUVEMENT PIR");
+            return true;
+        } else {
+            Serial.println("⚠️  Faux positif filtré");
+            return false;
+        }
+    }
+    
+    return false;
+}
+
+// ===== FONCTION BATTERIE AMÉLIORÉE =====
+float readBatteryVoltage() {
+    // Activer circuit batterie
+    pinMode(BAT_HOLD_PIN, OUTPUT);
+    digitalWrite(BAT_HOLD_PIN, HIGH);
+    delay(50);
+    
+    analogSetAttenuation(ADC_11db);
+    
+    long adcSum = 0;
+    for(int i = 0; i < 10; i++) {
+        adcSum += analogRead(BATTERY_ADC_PIN);
+        delay(2);
+    }
+    
+    digitalWrite(BAT_HOLD_PIN, LOW);
+    
+    int adcValue = adcSum / 10;
+    return (adcValue / (float)ADC_RESOLUTION) * ADC_REFERENCE * VOLTAGE_CALIBRATION;
+}
+
+int getBatteryPercentage(float voltage) {
+    if(voltage >= 4.2) return 100;
+    if(voltage >= 4.1) return 95;
+    if(voltage >= 4.0) return 90;
+    if(voltage >= 3.9) return 80;
+    if(voltage >= 3.8) return 70;
+    if(voltage >= 3.7) return 60;
+    if(voltage >= 3.6) return 50;
+    if(voltage >= 3.5) return 40;
+    if(voltage >= 3.4) return 30;
+    if(voltage >= 3.3) return 20;
+    if(voltage >= 3.2) return 10;
+    if(voltage >= 3.0) return 5;
+    return 0;
+}
+
+// ===== FONCTIONS UTILITAIRES =====
+void blinkLED(int times, int duration) {
+    for(int i = 0; i < times; i++) {
+        digitalWrite(LED_PIN, HIGH);
+        delay(duration);
+        digitalWrite(LED_PIN, LOW);
+        delay(duration);
+    }
+}
+
+bool canTakePhoto() {
+    if(lastPhotoTime == 0) return true;
+    unsigned long currentTime = millis() + (bootCount * 10000);
+    unsigned long elapsed = currentTime - lastPhotoTime;
+    
+    if(elapsed < PHOTO_COOLDOWN_MS) {
+        Serial.printf("⏳ Cooldown: %lu secondes restantes\n", 
+                     (PHOTO_COOLDOWN_MS - elapsed) / 1000);
+        return false;
+    }
+    
+    return true;
+}
+
+// ===== INITIALISATION CAMÉRA =====
+bool initCamera() {
+    camera_config_t config;
+    config.ledc_channel = LEDC_CHANNEL_0;
+    config.ledc_timer = LEDC_TIMER_0;
+    config.pin_d0 = Y2_GPIO_NUM;
+    config.pin_d1 = Y3_GPIO_NUM;
+    config.pin_d2 = Y4_GPIO_NUM;
+    config.pin_d3 = Y5_GPIO_NUM;
+    config.pin_d4 = Y6_GPIO_NUM;
+    config.pin_d5 = Y7_GPIO_NUM;
+    config.pin_d6 = Y8_GPIO_NUM;
+    config.pin_d7 = Y9_GPIO_NUM;
+    config.pin_xclk = XCLK_GPIO_NUM;
+    config.pin_pclk = PCLK_GPIO_NUM;
+    config.pin_vsync = VSYNC_GPIO_NUM;
+    config.pin_href = HREF_GPIO_NUM;
+    config.pin_sccb_sda = SIOD_GPIO_NUM;
+    config.pin_sccb_scl = SIOC_GPIO_NUM;
+    config.pin_pwdn = PWDN_GPIO_NUM;
+    config.pin_reset = RESET_GPIO_NUM;
+    config.xclk_freq_hz = 20000000;
+    config.pixel_format = PIXFORMAT_JPEG;
+    
+    if(psramFound()){
+        config.frame_size = FRAMESIZE_VGA;
+        config.jpeg_quality = 12;
+        config.fb_count = 2;
+    } else {
+        config.frame_size = FRAMESIZE_VGA;
+        config.jpeg_quality = 15;
+        config.fb_count = 1;
+    }
+
+    esp_err_t err = esp_camera_init(&config);
+    if(err != ESP_OK) {
+        Serial.printf("❌ Caméra erreur: 0x%x\n", err);
+        return false;
+    }
+    
+    Serial.println("✅ Caméra OK");
+    return true;
+}
+
+// ===== CONNEXION WIFI =====
+bool connectWiFi() {
+    Serial.println("📡 Connexion WiFi...");
+    
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(180);
+    wm.setConnectTimeout(30);
+    
+    bool connected = wm.autoConnect("ESP32CAM-Config", "nichoir2025");
+    
+    if(connected) {
+        Serial.println("✅ WiFi connecté");
+        Serial.print("SSID: ");
+        Serial.println(WiFi.SSID());
+        Serial.print("IP: ");
+        Serial.println(WiFi.localIP());
+        wifiPortalStarted = 0;
+        return true;
+    } else {
+        Serial.println("❌ Portail WiFi timeout");
+        wifiPortalStarted = 1;
+        return false;
+    }
+}
+
+// ===== CONNEXION MQTT =====
+bool connectMQTT() {
+    Serial.println("📡 Connexion MQTT...");
+    
+    mqttClient.setServer(mqtt_server, mqtt_port);
+    mqttClient.setBufferSize(30000);
+    
+    String clientId = "TimerCAM-" + String(bootCount);
+    
+    int attempts = 0;
+    while(!mqttClient.connected() && attempts < 3) {
+        Serial.printf("Tentative %d/3...\n", attempts + 1);
+        
+        if(mqttClient.connect(clientId.c_str())) {
+            Serial.println("✅ MQTT connecté");
+            return true;
+        }
+        
+        delay(1000);
+        attempts++;
+    }
+    
+    Serial.println("❌ MQTT échec");
+    return false;
+}
+
+// ===== CAPTURE ET ENVOI PHOTO (BATTERIE DANS JSON SEULEMENT) =====
+bool captureAndSendPhoto() {
+    Serial.println("📸 Capture photo...");
+    
+    camera_fb_t *fb = esp_camera_fb_get();
+    if(!fb) {
+        Serial.println("❌ Échec capture");
+        return false;
+    }
+    
+    Serial.printf("   Capture: %d octets\n", fb->len);
+    
+    // Lecture batterie
+    float voltage = readBatteryVoltage();
+    int batteryPercent = getBatteryPercentage(voltage);
+    
+    // Encodage base64
+    String imageBase64 = base64::encode(fb->buf, fb->len);
+    
+    // Création JSON avec infos batterie structurées
+    String json = "{";
+    json += "\"device\":\"TimerCAM\",";
+    json += "\"boot_count\":" + String(bootCount) + ",";
+    json += "\"photo_number\":" + String(photoCount) + ",";
+    json += "\"timestamp\":" + String(millis()) + ",";
+    json += "\"trigger\":\"PIR\",";
+    json += "\"battery\":{";
+    json += "\"voltage\":" + String(voltage, 3) + ",";
+    json += "\"percentage\":" + String(batteryPercent);
+    json += "},";
+    json += "\"image\":{";
+    json += "\"size\":" + String(fb->len) + ",";
+    json += "\"format\":\"jpg\",";
+    json += "\"resolution\":\"VGA\",";
+    json += "\"data\":\"" + imageBase64 + "\"";
+    json += "}";
+    json += "}";
+    
+    Serial.printf("   📦 JSON: %d octets\n", json.length());
+    
+    // Envoi MQTT
+    bool success = false;
+    int attempts = 0;
+    
+    while(!success && attempts < 2) {
+        success = mqttClient.publish(mqtt_topic, json.c_str());
+        
+        if(!success) {
+            Serial.println("⚠️  Nouvelle tentative...");
+            attempts++;
+            delay(500);
+        }
+    }
+    
+    esp_camera_fb_return(fb);
+    
+    if(success) {
+        Serial.println("✅ Photo envoyée");
+        photoCount++;
+        
+        // Feedback LED
+        blinkLED(5, 100);
+        
+        return true;
+    } else {
+        Serial.println("❌ Échec envoi photo");
+        
+        // Feedback d'erreur LED
+        blinkLED(3, 300);
+        
+        return false;
+    }
+}
+
+// ===== ATTENTE POUR MOUVEMENTS SUPPLEMENTAIRES (AVEC FILTRES) =====
+void waitForMoreMotion() {
+    Serial.println("\n⏳ Attente 15s pour mouvements supplémentaires...");
+    
+    unsigned long startTime = millis();
+    bool motionDetected = false;
+    
+    while(millis() - startTime < WAIT_AFTER_PHOTO_MS && !motionDetected) {
+        digitalWrite(LED_PIN, HIGH);
+        delay(100);
+        digitalWrite(LED_PIN, LOW);
+        
+        // Vérifier PIR AVEC FILTRES
+        if(checkPIRMovement()) {
+            Serial.println("🎯 Mouvement détecté pendant l'attente");
+            motionDetected = true;
+        }
+        
+        delay(900);
+    }
+    
+    if(motionDetected && canTakePhoto()) {
+        Serial.println("🔄 Nouvelle détection - Reprise...");
+        
+        if(captureAndSendPhoto()) {
+            lastPhotoTime = millis() + (bootCount * 10000);
+        }
+    }
+}
+
+// ===== CONFIGURATION DEEP SLEEP =====
+void prepareDeepSleep() {
+    Serial.println("\n💤 Préparation deep sleep...");
+    
+    digitalWrite(LED_PIN, LOW);
+    
+    // Maintenir BAT_HOLD_PIN à HIGH
+    rtc_gpio_init((gpio_num_t)BAT_HOLD_PIN);
+    rtc_gpio_set_direction((gpio_num_t)BAT_HOLD_PIN, RTC_GPIO_MODE_OUTPUT_ONLY);
+    rtc_gpio_set_level((gpio_num_t)BAT_HOLD_PIN, 1);
+    rtc_gpio_pullup_dis((gpio_num_t)BAT_HOLD_PIN);
+    rtc_gpio_pulldown_dis((gpio_num_t)BAT_HOLD_PIN);
+    
+    // Désactiver la LED
+    rtc_gpio_init((gpio_num_t)LED_PIN);
+    rtc_gpio_set_direction((gpio_num_t)LED_PIN, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pullup_dis((gpio_num_t)LED_PIN);
+    rtc_gpio_pulldown_dis((gpio_num_t)LED_PIN);
+    
+    gpio_deep_sleep_hold_en();
+    
+    if(wifiPortalStarted == 1) {
+        Serial.println("⚠️  Portail utilisé - Sleep court (30s)");
+        esp_sleep_enable_timer_wakeup(30 * 1000000);
+    } else {
+        Serial.println("   Réveil par détection PIR (avec filtres)");
+        esp_sleep_enable_ext0_wakeup((gpio_num_t)PIR_PIN, 1);
+    }
+    
+    delay(500);
+    
+    Serial.println("────────────────────────────────");
+    Serial.println("   ESP32 en deep sleep...");
+    Serial.println("   Pin 33 maintenue HIGH");
+    Serial.println("   Attente détection PIR");
+    Serial.println("────────────────────────────────\n");
+    
+    esp_deep_sleep_start();
+}
+
+// ===== SETUP PRINCIPAL =====
+void setup() {
+    bootCount++;
+    
+    Serial.begin(115200);
+    delay(2000);
+    
+    WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+    
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(PIR_PIN, INPUT);
+    pinMode(BAT_HOLD_PIN, OUTPUT);
+    digitalWrite(BAT_HOLD_PIN, HIGH);
+    
+    analogSetAttenuation(ADC_11db);
+    
+    Serial.println("\n══════════════════════════════════════");
+    Serial.println("        TIMERCAM - DÉMARRAGE");
+    Serial.println("══════════════════════════════════════");
+    Serial.printf("Boot #%d | Photos: %d\n\n", bootCount, photoCount);
+    
+    blinkLED(2, 200);
+    
+    // Vérifier si réveil par PIR (avec filtres)
+    bool pirWakeup = isPIRTriggeredWakeup();
+    
+    // Vérification cooldown
+    if(!canTakePhoto()) {
+        Serial.println("⏳ Cooldown actif");
+        
+        if(pirWakeup) {
+            Serial.println("   Mouvement détecté mais cooldown actif");
+        }
+        
+        waitForMoreMotion();
+        prepareDeepSleep();
+    }
+    
+    // Si pas de réveil PIR, vérifier mouvement actuel
+    if(!pirWakeup) {
+        if(checkPIRMovement()) {
+            pirWakeup = true;
+        }
+    }
+    
+    // Si aucun mouvement, sleep direct
+    if(!pirWakeup) {
+        Serial.println("😴 Aucun mouvement détecté");
+        prepareDeepSleep();
+    }
+    
+    // Initialisation caméra
+    if(!initCamera()) {
+        Serial.println("❌ Caméra - Sleep");
+        delay(2000);
+        prepareDeepSleep();
+    }
+    
+    // Connexion WiFi
+    if(!connectWiFi()) {
+        Serial.println("❌ WiFi - Sleep");
+        if(wifiPortalStarted == 0) {
+            delay(2000);
+            prepareDeepSleep();
+        }
+    }
+    
+    // Connexion MQTT
+    if(!connectMQTT()) {
+        Serial.println("⚠️  MQTT échec - On continue");
+    }
+    
+    // Capture et envoi
+    if(captureAndSendPhoto()) {
+        lastPhotoTime = millis() + (bootCount * 10000);
+    }
+    
+    // Attente mouvements supplémentaires
+    waitForMoreMotion();
+    
+    // Nettoyage
+    if(mqttClient.connected()) mqttClient.disconnect();
+    WiFi.disconnect(true);
+    delay(500);
+    
+    // Deep sleep
+    prepareDeepSleep();
+}
+
+void loop() {
+    // Jamais exécuté
+}
