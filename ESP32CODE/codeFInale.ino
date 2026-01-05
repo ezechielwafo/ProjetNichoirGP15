@@ -30,7 +30,7 @@ const int ADC_RESOLUTION = 4095;
 const float VOLTAGE_CALIBRATION = 1.38;
 
 // ===== CONFIGURATION SLEEP MODE =====
-const uint64_t TIME_TO_SLEEP = 60;  // Réveil toutes les 60 secondes pour photo auto
+const uint64_t TIME_TO_SLEEP = 300;  // Réveil toutes les 300 secondes pour photo auto
 RTC_DATA_ATTR int bootCount = 0;
 RTC_DATA_ATTR int photoCounter = 0;
 RTC_DATA_ATTR int pirDetectionCount = 0;
